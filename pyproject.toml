@@ -1,0 +1,12 @@
+[project]
+name = "psut-community-service-notifier"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bs4>=0.0.2",
+    "lxml>=6.0.2",
+    "python-dotenv>=1.2.1",
+    "selenium>=4.38.0",
+]
