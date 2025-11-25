@@ -223,7 +223,8 @@ def run_scraper():
     # =========== Create gemini client ===========
     try:
         model_name = "gemini-2.5-flash"
-        system_prompt = """You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
+        system_prompt = """
+You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
 
 Rules:
 1. If a field is not found, set the value to null.
