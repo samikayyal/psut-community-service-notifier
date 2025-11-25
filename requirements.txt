@@ -1,12 +1,21 @@
 attrs==25.4.0
 beautifulsoup4==4.14.2
+blinker==1.9.0
 bs4==0.0.2
 certifi==2025.11.12
 cffi==2.0.0
+click==8.3.1
+colorama==0.4.6
+flask==3.1.2
+gunicorn==23.0.0
 h11==0.16.0
 idna==3.11
+itsdangerous==2.2.0
+jinja2==3.1.6
 lxml==6.0.2
+markupsafe==3.0.3
 outcome==1.3.0.post0
+packaging==25.0
 pycparser==2.23
 pysocks==1.7.1
 python-dotenv==1.2.1
@@ -19,4 +28,5 @@ trio-websocket==0.12.2
 typing-extensions==4.15.0
 urllib3==2.5.0
 websocket-client==1.9.0
+werkzeug==3.1.3
 wsproto==1.3.2

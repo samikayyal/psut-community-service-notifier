@@ -5,6 +5,7 @@ import time
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from flask import Flask
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
@@ -15,8 +16,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 load_dotenv()
 
+# Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")
+IS_RUNNING_IN_DOCKER: bool = True
+
+# Define flask app
+app = Flask(__name__)
 
 
 def close_notifications(browser):
@@ -31,19 +37,7 @@ def close_notifications(browser):
         print("No notification close button found, continuing...")
 
 
-def scrape_lectures():
-    options = Options()
-    options.add_argument("--headless=new")
-    # I have to add these because headless without them doesnt work
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--start-maximized")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-
-    service = Service()
-
-    browser = Chrome(service=service, options=options)
+def scrape_lectures(browser: Chrome):
     browser.get("https://portal.psut.edu.jo")
 
     # Define wait object
@@ -235,12 +229,43 @@ def scrape_lectures():
             json.dump(lectures_data, j, indent=2)
 
         print(f"{len(lectures_data)} activities saved to lectures.json")
+        return "Scraping completed successfully.", 200
+
+    except Exception as e:
+        if IS_RUNNING_IN_DOCKER:
+            return f"Error: {e}", 500
+        else:
+            print(f"An error occurred: {e}")
 
     finally:
         browser.quit()
 
 
+def run_scraper():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    # I have to add these because headless without them doesnt work
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+
+    # Path to chromium driver installed in Dockerfile
+    if IS_RUNNING_IN_DOCKER:
+        service = Service("/usr/bin/chromedriver")
+    else:
+        service = Service()
+
+    browser = Chrome(service=service, options=options)
+
+    scrape_lectures(browser)
+
+
 if __name__ == "__main__":
     if not USERNAME or not PASSWORD:
         raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
-    scrape_lectures()
+
+    run_scraper()
