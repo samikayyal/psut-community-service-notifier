@@ -20,7 +20,7 @@ load_dotenv()
 # Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")
-IS_RUNNING_IN_DOCKER: bool = True
+IS_RUNNING_IN_DOCKER: bool = os.getenv("IS_DOCKER", "False").lower() == "true"
 
 # Define flask app
 app = Flask(__name__)
@@ -39,7 +39,7 @@ def close_notifications(browser):
         time.sleep(1)
         notification_close.click()
     except NoSuchElementException:
-        logger.info("No notification close button found, continuing...")
+        logger.info("No notification close button found, continuing.")
 
 
 def scrape_lectures(browser: Chrome):
@@ -239,7 +239,7 @@ def scrape_lectures(browser: Chrome):
         browser.quit()
 
 
-@app.route("", methods=["GET", "POST"])
+@app.route("/", methods=["GET", "POST"])
 def run_scraper():
     if not USERNAME or not PASSWORD:
         raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
