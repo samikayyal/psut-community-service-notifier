@@ -5,7 +5,6 @@ RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
     libnss3 \
-    libgconf-2-4 \
     libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
