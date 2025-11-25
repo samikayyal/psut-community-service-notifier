@@ -34,20 +34,32 @@ class LectureData(BaseModel):
     date: str | None = Field(description="Date of the lecture")
     time: str | None = Field(description="Time of the lecture")
     location: str | None = Field(description="Location of the lecture")
-    activity_hours: str | None = Field(description="Number of activity hours")
-    restrictions: str | None = Field(description="Any restrictions for the lecture")
+    activity_hours: str | None = Field(
+        description="Number of activity hours, marked under Activity Hours"
+    )
+    restrictions: str | None = Field(
+        description="Any restrictions for the lecture, marked by Registration Conditions"
+    )
     max_registrations: int | None = Field(
-        description="Maximum number of registrations allowed"
+        description="Maximum number of registrations allowed, marked under Maximum Registration"
     )
     current_registrations: int | None = Field(
-        description="Current number of registrations"
+        description="Current number of registrations, marked under Registered Count:"
     )
-    start_date: str | None = Field(description="Start date for registration")
-    end_date: str | None = Field(description="End date for registration")
-    officer_name: str | None = Field(description="Name of the officer in charge")
-    officer_email: str | None = Field(description="Email of the officer in charge")
+    start_date: str | None = Field(
+        description="Start date for registration, marked under Subscription and withdrawal Period"
+    )
+    end_date: str | None = Field(
+        description="End date for registration, marked under Subscription and withdrawal Period"
+    )
+    officer_name: str | None = Field(
+        description="Name of the officer in charge, marked under Activity Officer"
+    )
+    officer_email: str | None = Field(
+        description="Email of the officer in charge, marked under Activity Officer"
+    )
     officer_phone: str | None = Field(
-        description="Phone number of the officer in charge"
+        description="Phone number of the officer in charge, marked under Activity Officer"
     )
 
 
