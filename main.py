@@ -230,24 +230,35 @@ def scrape_lectures(browser: Chrome):
         return lectures_data
 
     except Exception as e:
-        if IS_RUNNING_IN_DOCKER:
-            return f"Error: {e}", 500
-        else:
-            logger.error(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
+        raise  # Re-raise to let caller handle it
 
-    finally:
-        browser.quit()
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for Google Cloud Run"""
+    return jsonify({"status": "healthy"}), 200
 
 
 @app.route("/", methods=["GET", "POST"])
 def run_scraper():
     if not USERNAME or not PASSWORD:
-        raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
+        return (
+            jsonify(
+                {"status": "error", "message": "Missing PSUT_USERNAME or PSUT_PASSWORD"}
+            ),
+            500,
+        )
 
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    # Reduce memory usage for Cloud Run
+    options.add_argument("--disable-extensions")
+    options.add_argument("--single-process")
     # I have to add these because headless without them doesnt work
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--start-maximized")
@@ -255,12 +266,14 @@ def run_scraper():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Path to chromium driver installed in Dockerfile
+    # Path to chromium driver and binary installed in Dockerfile
     if IS_RUNNING_IN_DOCKER:
+        options.binary_location = "/usr/bin/chromium"
         service = Service("/usr/bin/chromedriver")
     else:
         service = Service()
 
+    browser = None
     try:
         browser = Chrome(service=service, options=options)
         data = scrape_lectures(browser)
@@ -269,7 +282,7 @@ def run_scraper():
         else:
             return "Scraping completed. Check lectures.json for results."
     except Exception as e:
-        logger.error(f"An error occurred while initializing the browser: {e}")
+        logger.error(f"An error occurred: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         if browser:
