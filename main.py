@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 import re
 import time
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, jsonify
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
@@ -24,6 +25,10 @@ IS_RUNNING_IN_DOCKER: bool = True
 # Define flask app
 app = Flask(__name__)
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
 
 def close_notifications(browser):
     """Close the notification box if it exists"""
@@ -34,7 +39,7 @@ def close_notifications(browser):
         time.sleep(1)
         notification_close.click()
     except NoSuchElementException:
-        print("No notification close button found, continuing...")
+        logger.info("No notification close button found, continuing...")
 
 
 def scrape_lectures(browser: Chrome):
@@ -95,22 +100,14 @@ def scrape_lectures(browser: Chrome):
             # The browser inserts the word 'Posted' so ill remove it
             title = title.replace("Posted", "").strip()
 
-            #############################################
-            with open("temp.txt", "w", encoding="utf-8") as f:
-                f.write(browser.page_source)
-            #############################################
-
             soup = BeautifulSoup(browser.page_source, "lxml")
 
             # Date and time
             date_and_time = soup.find_all(
                 "span", class_="col-auto text-muted font-small-3 d-inline-block"
             )
-            if len(date_and_time) != 2:
-                raise ValueError("Could not find date and time spans.")
-
-            date = date_and_time[0].text.strip()
-            time_ = date_and_time[1].text.strip()
+            date = date_and_time[0].text.strip() if len(date_and_time) > 0 else "N/A"
+            time_ = date_and_time[1].text.strip() if len(date_and_time) > 1 else "N/A"
 
             # Info card
             info_card = soup.find("div", id="info-details")
@@ -224,24 +221,29 @@ def scrape_lectures(browser: Chrome):
             # Switch back to the original window
             browser.switch_to.window(original_window)
 
-        # Save to json
-        with open("lectures.json", "w", encoding="utf-8") as j:
-            json.dump(lectures_data, j, indent=2)
+        if not IS_RUNNING_IN_DOCKER:
+            # Save to json
+            with open("lectures.json", "w", encoding="utf-8") as j:
+                json.dump(lectures_data, j, indent=2)
 
-        print(f"{len(lectures_data)} activities saved to lectures.json")
-        return "Scraping completed successfully.", 200
+        logger.info(f"{len(lectures_data)} activities saved to lectures.json")
+        return lectures_data
 
     except Exception as e:
         if IS_RUNNING_IN_DOCKER:
             return f"Error: {e}", 500
         else:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
 
     finally:
         browser.quit()
 
 
+@app.route("", methods=["GET", "POST"])
 def run_scraper():
+    if not USERNAME or not PASSWORD:
+        raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
+
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -259,13 +261,21 @@ def run_scraper():
     else:
         service = Service()
 
-    browser = Chrome(service=service, options=options)
-
-    scrape_lectures(browser)
+    try:
+        browser = Chrome(service=service, options=options)
+        data = scrape_lectures(browser)
+        if IS_RUNNING_IN_DOCKER:
+            return jsonify({"status": "success", "data": data}), 200
+        else:
+            return "Scraping completed. Check lectures.json for results."
+    except Exception as e:
+        logger.error(f"An error occurred while initializing the browser: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if browser:
+            browser.quit()
 
 
 if __name__ == "__main__":
-    if not USERNAME or not PASSWORD:
-        raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
-
-    run_scraper()
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
