@@ -7,6 +7,9 @@ import time
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
@@ -15,19 +18,53 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+app = Flask(__name__)
+
 load_dotenv()
 
 # Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")
-IS_RUNNING_IN_DOCKER: bool = os.getenv("IS_DOCKER", "False").lower() == "true"
-
-# Define flask app
-app = Flask(__name__)
-
-# Configure logging
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
+
+
+class LectureData(BaseModel):
+    title: str | None = Field(description="Title of the lecture")
+    date: str | None = Field(description="Date of the lecture")
+    time: str | None = Field(description="Time of the lecture")
+    location: str | None = Field(description="Location of the lecture")
+    activity_hours: str | None = Field(description="Number of activity hours")
+    restrictions: str | None = Field(description="Any restrictions for the lecture")
+    max_registrations: int | None = Field(
+        description="Maximum number of registrations allowed"
+    )
+    current_registrations: int | None = Field(
+        description="Current number of registrations"
+    )
+    start_date: str | None = Field(description="Start date for registration")
+    end_date: str | None = Field(description="End date for registration")
+    officer_name: str | None = Field(description="Name of the officer in charge")
+    officer_email: str | None = Field(description="Email of the officer in charge")
+    officer_phone: str | None = Field(
+        description="Phone number of the officer in charge"
+    )
+
+
+def clean_html(content: str) -> str:
+    # Remove href attributes
+    content = re.sub(r'href="[^"]*"', 'href=""', content)
+    # Remove src attributes
+    content = re.sub(r'src="[^"]*"', 'src=""', content)
+
+    # remove script tags and their content
+    content = re.sub(r"<script.*?>.*?</script>", "", content, flags=re.DOTALL)
+
+    # Style tags and their content
+    content = re.sub(r"<style.*?>.*?</style>", "", content, flags=re.DOTALL)
+    soup = BeautifulSoup(content, "lxml")
+
+    return soup.prettify()
 
 
 def close_notifications(browser):
@@ -39,10 +76,12 @@ def close_notifications(browser):
         time.sleep(1)
         notification_close.click()
     except NoSuchElementException:
-        logger.info("No notification close button found, continuing.")
+        logger.info("No notification close button found, continuing...")
 
 
-def scrape_lectures(browser: Chrome):
+def scrape_lectures(
+    browser: Chrome, model_name: str, system_prompt: str = ""
+) -> list[dict]:
     browser.get("https://portal.psut.edu.jo")
 
     # Define wait object
@@ -78,213 +117,140 @@ def scrape_lectures(browser: Chrome):
 
     original_window = browser.current_window_handle
 
-    lectures_data: list[dict] = []
-    try:
-        # Loop through them and open each one
-        for lecture in lectures:
+    # Collect all hrefs first to avoid stale element issues
+    lecture_hrefs = []
+    for lecture in lectures:
+        try:
             link = lecture.find_element(By.TAG_NAME, "a")
-            # Get the link href
             href = link.get_attribute("href")
+            if href:
+                lecture_hrefs.append(href)
+        except Exception as e:
+            logger.warning(f"Could not get href from lecture: {e}")
+
+    lectures_data: list[dict] = []
+    lectures_html_pages: list[str] = []
+    # Collect html content of each lecture
+    try:
+        for href in lecture_hrefs:
             # Open the link in a new tab
             browser.execute_script("window.open(arguments[0]);", href)
 
             # Switch to the new tab
             browser.switch_to.window(browser.window_handles[-1])
+            time.sleep(5)  # Wait for the page to load
+            page_content = clean_html(browser.page_source)
+            # Get the data needed from Gemini:
+            lectures_html_pages.append(page_content)
 
-            # Extract all relevant data
-            title = wait.until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "/html/body/div[2]/div/div[1]/div/div[1]/h4/span[1]")
-                )
-            ).text
-            # The browser inserts the word 'Posted' so ill remove it
-            title = title.replace("Posted", "").strip()
-
-            soup = BeautifulSoup(browser.page_source, "lxml")
-
-            # Date and time
-            date_and_time = soup.find_all(
-                "span", class_="col-auto text-muted font-small-3 d-inline-block"
-            )
-            date = date_and_time[0].text.strip() if len(date_and_time) > 0 else "N/A"
-            time_ = date_and_time[1].text.strip() if len(date_and_time) > 1 else "N/A"
-
-            # Info card
-            info_card = soup.find("div", id="info-details")
-
-            # Activity Hours
-            activity_hours = info_card.find(
-                "span", string=lambda text: "Activity Hours" in text
-            )
-            if activity_hours:
-                activity_hours = activity_hours.parent.text.replace(
-                    "Activity Hours:", ""
-                ).strip()
-            else:
-                activity_hours = None
-
-            # Restrictions
-            restrictions = info_card.find(
-                "strong", string=lambda text: "Registration Conditions" in text
-            )
-            if restrictions:
-                restrictions = restrictions.find_next(
-                    "div", class_="form-group"
-                ).text.strip()
-                restrictions = re.sub(r"\s+", " ", restrictions).strip()
-            else:
-                restrictions = None
-
-            # Maximum Registrations
-            max_registrations = info_card.find(
-                "span", string=lambda text: "Maximum Registration" in text
-            )
-            if max_registrations:
-                max_registrations = max_registrations.parent.text.replace(
-                    "Maximum Registration:", ""
-                ).strip()
-            else:
-                max_registrations = None
-
-            # Current registrations
-            current_registrations = info_card.find(
-                "span", string=lambda text: "Registered Count" in text
-            )
-            if current_registrations:
-                current_registrations = current_registrations.parent.text.replace(
-                    "Registered Count:", ""
-                ).strip()
-            else:
-                current_registrations = None
-
-            # Start and end date for registration
-            dates = info_card.find(
-                "label",
-                string=lambda text: "Subscription and withdrawal Period" in text,
-            )
-            if dates:
-                dates = dates.parent.text.replace(
-                    "Subscription and withdrawal Period:", ""
-                ).strip()
-                dates = re.sub(r"\s+", " ", dates).strip()
-                # Split into start and end date
-                start_date, end_date = dates.split("-")
-            else:
-                start_date = None
-                end_date = None
-
-            # Activity officer and their email
-            officer = info_card.find(
-                "strong", string=lambda text: "Activity Officer" in text
-            )
-            if officer:
-                officer_data = officer.parent.next_sibling.next_sibling
-                officer_data = officer_data.find_all("div", class_="form-group")
-
-                # Set these in case no info is found
-                officer_name = None
-                officer_email = None
-                officer_phone = None
-
-                for data in officer_data:
-                    if "Name" in data.text:
-                        officer_name = data.text.replace("Name:", "").strip()
-                    elif "Email" in data.text:
-                        officer_email = data.text.replace("Email:", "").strip()
-                    elif "Mobile Number" in data.text:
-                        officer_phone = data.text.replace("Mobile Number:", "").strip()
-            else:
-                officer_name = None
-                officer_email = None
-                officer_phone = None
-
-            lectures_data.append(
-                {
-                    "title": title,
-                    "date": date,
-                    "time": time_,
-                    "activity_hours": activity_hours,
-                    "restrictions": restrictions,
-                    "max_registrations": max_registrations,
-                    "current_registrations": current_registrations,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "officer_name": officer_name,
-                    "officer_email": officer_email,
-                    "officer_phone": officer_phone,
-                }
-            )
-
-            # Close the tab
-            browser.close()
-
+            # Close the tab if we're not on the original window
+            if browser.current_window_handle != original_window:
+                browser.close()
             # Switch back to the original window
             browser.switch_to.window(original_window)
+            # Small delay to let the browser stabilize
+            time.sleep(0.5)
 
-        if not IS_RUNNING_IN_DOCKER:
-            # Save to json
-            with open("lectures.json", "w", encoding="utf-8") as j:
-                json.dump(lectures_data, j, indent=2)
+        # Split the pages into 2 batches to avoid token limits
+        batch_size = len(lectures_html_pages) // 2 + 1
+        for i in range(0, len(lectures_html_pages), batch_size):
+            batch_pages = lectures_html_pages[i : i + batch_size]
+            combined_pages = "\n\n<<<NEXT_PAGE_SEPARATOR>>>\n\n".join(batch_pages)
 
-        logger.info(f"{len(lectures_data)} activities saved to lectures.json")
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
+            response = client.models.generate_content(
+                model=model_name,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    response_mime_type="application/json",
+                    response_schema=list[LectureData],
+                ),
+                contents=[
+                    f"""
+Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
+The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
+Here are the HTML pages:
+
+{combined_pages}"""
+                ],
+            )
+            # Parse the response and add to lectures_data
+
+            batch_data = json.loads(response.text)
+            lectures_data.extend(batch_data)
+            logger.info(f"Processed batch of {len(batch_data)} lectures")
+
+        logger.info(f"Scraped {len(lectures_data)} lectures")
         return lectures_data
-
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        raise  # Re-raise to let caller handle it
-
-
-@app.route("/health", methods=["GET"])
-def health_check():
-    """Health check endpoint for Google Cloud Run"""
-    return jsonify({"status": "healthy"}), 200
+        logger.error(f"An error occurred while collecting lecture information: {e}")
+        raise
 
 
 @app.route("/", methods=["GET", "POST"])
 def run_scraper():
     if not USERNAME or not PASSWORD:
-        return (
-            jsonify(
-                {"status": "error", "message": "Missing PSUT_USERNAME or PSUT_PASSWORD"}
-            ),
-            500,
+        raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
+
+    # =========== Create the browser ===========
+    try:
+        options = Options()
+        options.add_argument("--headless=new")
+        # I have to add these because headless without them doesnt work
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--start-maximized")
+        options.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
 
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    # I have to add these because headless without them doesnt work
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--start-maximized")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
+        # Additions for Docker/Cloud Run
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
 
-    # Path to chromium driver and binary installed in Dockerfile
-    if IS_RUNNING_IN_DOCKER:
-        options.binary_location = "/usr/bin/chromium"
-        service = Service("/usr/bin/chromedriver")
-    else:
         service = Service()
 
-    browser = None
-    try:
+        if os.getenv("IS_DOCKER"):
+            options.binary_location = "/usr/bin/chromium"
+            service = Service(executable_path="/usr/bin/chromedriver")
+
         browser = Chrome(service=service, options=options)
-        data = scrape_lectures(browser)
-        if IS_RUNNING_IN_DOCKER:
-            return jsonify({"status": "success", "data": data}), 200
-        else:
-            return "Scraping completed. Check lectures.json for results."
+    except Exception as e:
+        logger.error(f"Failed to initialize the browser: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    # =========== Create gemini client ===========
+    try:
+        model_name = "gemini-2.5-flash"
+        system_prompt = """You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
+
+Rules:
+1. If a field is not found, set the value to null.
+2. Preserve all Arabic text exactly as it appears. Do not translate Arabic to English.
+3. You will receive multiple HTML pages separated by the delimiter: "<<<NEXT_PAGE_SEPARATOR>>>".
+4. Process every page provided and return one JSON object per page in the list.
+5. Adhere STRICTLY to the provided schema. Do not add any extra fields or information."""
+
+    except Exception as e:
+        logger.error(f"Failed to initialize Gemini client: {e}")
+        browser.quit()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    # =========== Run the scraper ===========
+    try:
+        data = scrape_lectures(browser, model_name, system_prompt)
+        return jsonify({"status": "success", "data": data}), 200
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
-        if browser:
-            browser.quit()
+        browser.quit()
 
 
 if __name__ == "__main__":
+    # data = run_scraper()
+    # with open("lectures_data.json", "w", encoding="utf-8") as f:
+    #     json.dump(data, f, ensure_ascii=False, indent=2)
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)

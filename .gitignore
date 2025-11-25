@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Data
-lectures.json
+lectures*.json
 .env
 temp*
 ssh*
