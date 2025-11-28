@@ -1,3 +1,0 @@
-Activity officer information:
-- sometimes there is a phone number, so parse the officer's data correctly
-- handle each piece of info separately to have each of them as N\A if they dont exist
