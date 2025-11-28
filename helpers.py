@@ -1,6 +1,13 @@
-from google.genai import errors
+import json
+import os
 import re
+
 from bs4 import BeautifulSoup
+from google.cloud import storage
+from google.genai import errors
+
+from logger_setup import logger
+
 
 def parse_gemini_error(e: errors.APIError) -> str:
     if e.code == 400:
@@ -16,6 +23,7 @@ def parse_gemini_error(e: errors.APIError) -> str:
     else:
         return f"An unexpected error occurred: {e.message}"
 
+
 def clean_html(content: str) -> str:
     # Remove href attributes
     content = re.sub(r'href="[^"]*"', 'href=""', content)
@@ -30,3 +38,49 @@ def clean_html(content: str) -> str:
     soup = BeautifulSoup(content, "lxml")
 
     return soup.prettify()
+
+
+def load_previous_lectures() -> list[dict]:
+    """Load previously scraped lectures from GCS"""
+    try:
+        bucket = get_gcs_bucket()
+        if not bucket:
+            return []
+        blob = bucket.blob("lectures_data.json")
+        if blob.exists():
+            data = blob.download_as_text()
+            return json.loads(data)
+    except Exception as e:
+        logger.warning(f"Could not load previous lectures from GCS: {e}")
+    return []
+
+
+def save_lectures_to_gcs(lectures: list[dict]):
+    """Save current lectures to GCS"""
+    try:
+        bucket = get_gcs_bucket()
+        if not bucket:
+            return
+        blob = bucket.blob("lectures_data.json")
+        blob.upload_from_string(
+            json.dumps(lectures, indent=2), content_type="application/json"
+        )
+        logger.info("Saved lectures to GCS")
+    except Exception as e:
+        logger.error(f"Could not save lectures to GCS: {e}")
+
+
+def get_gcs_bucket() -> storage.Bucket | None:
+    """Get the GCS bucket object"""
+    # If running locally without GCS configured, this might fail if credentials aren't set up.
+    # We'll assume the environment is configured correctly for Cloud Run.
+    try:
+        client = storage.Client()
+        bucket_name = os.getenv("GCS_BUCKET_NAME")
+        if not bucket_name:
+            logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")
+            return None
+        return client.bucket(bucket_name)
+    except Exception as e:
+        logger.warning(f"Failed to initialize GCS client: {e}")
+        return None

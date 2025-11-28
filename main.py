@@ -4,6 +4,7 @@ import os
 import time
 
 from dotenv import load_dotenv
+from flask import Flask, jsonify
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
@@ -15,16 +16,21 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from helpers import clean_html, parse_gemini_error
+import logger_setup
+from helpers import (
+    clean_html,
+    load_previous_lectures,
+    parse_gemini_error,
+    save_lectures_to_gcs,
+)
 from send_emails import send_brevo_email
 
 load_dotenv()
-
 # Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = logger_setup.logger
+app = Flask(__name__)
 
 
 class LectureData(BaseModel):
@@ -250,20 +256,52 @@ def run_scraper() -> list[dict] | None:
         browser.quit()
 
 
+@app.route("/", methods=["GET", "POST"])
 def main():
     # =========== Run the scraper ===========
-    data = run_scraper()
-    if not data:
-        logger.error("No data scraped.")
-        return
+    current_lectures = run_scraper()
+    if current_lectures is None:
+        logger.error("Scraper failed to run.")
+        return jsonify({"error": "Scraper failed to run."}), 500
+
+    if not current_lectures:
+        logger.info("No lectures found on the portal.")
+        return jsonify({"message": "No lectures found on the portal."}), 200
+
+    # =========== Check for new lectures ===========
+    previous_lectures = load_previous_lectures()
+
+    # Create a set of unique keys for previous lectures
+    # We use title, date, and time as the unique identifier
+    prev_keys = {
+        (lecture.get("title"), lecture.get("date"), lecture.get("time"))
+        for lecture in previous_lectures
+    }
+
+    new_lectures = []
+    for lecture in current_lectures:
+        key = (lecture.get("title"), lecture.get("date"), lecture.get("time"))
+        if key not in prev_keys:
+            new_lectures.append(lecture)
+
+    if not new_lectures:
+        logger.info("No new lectures found.")
+        return jsonify({"message": "No new lectures found."}), 200
+
+    logger.info(f"Found {len(new_lectures)} new lectures.")
 
     # =========== Send emails ===========
-    message, success = send_brevo_email(data)
+    message, success = send_brevo_email(new_lectures)
     if success:
         logger.info("Emails sent successfully.")
+        # Only save the new state if emails were sent successfully
+        # This ensures that if email sending fails, we'll try again next time
+        save_lectures_to_gcs(current_lectures)
+        return jsonify({"message": message}), 200
     else:
         logger.error(f"Failed to send emails: {message}")
+        return jsonify({"error": message}), 500
 
 
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

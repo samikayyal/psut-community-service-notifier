@@ -22,5 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
 COPY . .
 
-# Run the application
-CMD ["python", "main.py"]
+# Expose the port
+EXPOSE 8080
+
+# Timeout increased to 300s (5 mins) because scraping takes time
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 300 main:app
