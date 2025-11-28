@@ -40,6 +40,22 @@ def clean_html(content: str) -> str:
     return soup.prettify()
 
 
+def get_gcs_bucket() -> storage.Bucket | None:
+    """Get the GCS bucket object"""
+    # If running locally without GCS configured, this might fail if credentials aren't set up.
+    # We'll assume the environment is configured correctly for Cloud Run.
+    try:
+        client = storage.Client()
+        bucket_name = os.getenv("GCS_BUCKET_NAME")
+        if not bucket_name:
+            logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")
+            return None
+        return client.bucket(bucket_name)
+    except Exception as e:
+        logger.warning(f"Failed to initialize GCS client: {e}")
+        return None
+
+
 def load_previous_lectures() -> list[dict]:
     """Load previously scraped lectures from GCS"""
     try:
@@ -68,19 +84,3 @@ def save_lectures_to_gcs(lectures: list[dict]):
         logger.info("Saved lectures to GCS")
     except Exception as e:
         logger.error(f"Could not save lectures to GCS: {e}")
-
-
-def get_gcs_bucket() -> storage.Bucket | None:
-    """Get the GCS bucket object"""
-    # If running locally without GCS configured, this might fail if credentials aren't set up.
-    # We'll assume the environment is configured correctly for Cloud Run.
-    try:
-        client = storage.Client()
-        bucket_name = os.getenv("GCS_BUCKET_NAME")
-        if not bucket_name:
-            logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")
-            return None
-        return client.bucket(bucket_name)
-    except Exception as e:
-        logger.warning(f"Failed to initialize GCS client: {e}")
-        return None
