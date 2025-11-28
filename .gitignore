@@ -14,3 +14,4 @@ lectures*.json
 .env
 temp*
 ssh*
+notes.txt

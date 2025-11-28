@@ -1,14 +1,11 @@
 import json
 import logging
 import os
-import re
 import time
 
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from flask import Flask, jsonify
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, Field
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import Chrome
@@ -18,7 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-app = Flask(__name__)
+from helpers import clean_html, parse_gemini_error
 
 load_dotenv()
 
@@ -63,28 +60,15 @@ class LectureData(BaseModel):
     )
 
 
-def clean_html(content: str) -> str:
-    # Remove href attributes
-    content = re.sub(r'href="[^"]*"', 'href=""', content)
-    # Remove src attributes
-    content = re.sub(r'src="[^"]*"', 'src=""', content)
-
-    # remove script tags and their content
-    content = re.sub(r"<script.*?>.*?</script>", "", content, flags=re.DOTALL)
-
-    # Style tags and their content
-    content = re.sub(r"<style.*?>.*?</style>", "", content, flags=re.DOTALL)
-    soup = BeautifulSoup(content, "lxml")
-
-    return soup.prettify()
-
-
 def close_notifications(browser):
     """Close the notification box if it exists"""
     try:
-        notification_close = browser.find_element(
-            by="xpath", value="/html/body/div[3]/div/div[5]/div/div/div[1]/button/span"
+        notification_close = WebDriverWait(browser, 5).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "/html/body/div[3]/div/div[5]/div/div/div[1]/button/span")
+            )
         )
+
         time.sleep(1)
         notification_close.click()
     except NoSuchElementException:
@@ -169,29 +153,34 @@ def scrape_lectures(
             batch_pages = lectures_html_pages[i : i + batch_size]
             combined_pages = "\n\n<<<NEXT_PAGE_SEPARATOR>>>\n\n".join(batch_pages)
 
-            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
-            response = client.models.generate_content(
-                model=model_name,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
-                    response_mime_type="application/json",
-                    response_schema=list[LectureData],
-                ),
-                contents=[
-                    f"""
-Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
-The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
-Here are the HTML pages:
+            try:
+                client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
+                response = client.models.generate_content(
+                    model=model_name,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        response_mime_type="application/json",
+                        response_schema=list[LectureData],
+                    ),
+                    contents=[
+                        f"""
+                    Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
+                    The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
+                    Here are the HTML pages:
 
-{combined_pages}"""
-                ],
-            )
+                    {combined_pages}"""
+                    ],
+                )
+                data = response.model_dump_json()
+                batch_data = json.loads(data)
+                lectures_data.extend(batch_data)
+                logger.info(f"Processed batch of {len(batch_data)} lectures")
+
+            except errors.APIError as e:
+                raise Exception(f"Gemini API Error: {parse_gemini_error(e)}")
+
             # Parse the response and add to lectures_data
-
-            batch_data = json.loads(response.text)
-            lectures_data.extend(batch_data)
-            logger.info(f"Processed batch of {len(batch_data)} lectures")
 
         logger.info(f"Scraped {len(lectures_data)} lectures")
         return lectures_data
@@ -200,8 +189,7 @@ Here are the HTML pages:
         raise
 
 
-@app.route("/", methods=["GET", "POST"])
-def run_scraper():
+def run_scraper() -> list[dict] | None:
     if not USERNAME or not PASSWORD:
         raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
 
@@ -230,40 +218,46 @@ def run_scraper():
         browser = Chrome(service=service, options=options)
     except Exception as e:
         logger.error(f"Failed to initialize the browser: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return None
 
     # =========== Create gemini client ===========
     try:
         model_name = "gemini-2.5-flash"
         system_prompt = """
-You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
+        You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
 
-Rules:
-1. If a field is not found, set the value to null.
-2. Preserve all Arabic text exactly as it appears. Do not translate Arabic to English.
-3. You will receive multiple HTML pages separated by the delimiter: "<<<NEXT_PAGE_SEPARATOR>>>".
-4. Process every page provided and return one JSON object per page in the list.
-5. Adhere STRICTLY to the provided schema. Do not add any extra fields or information."""
+        Rules:
+        1. If a field is not found, set the value to null.
+        2. Preserve all Arabic text exactly as it appears. Do not translate Arabic to English.
+        3. You will receive multiple HTML pages separated by the delimiter: "<<<NEXT_PAGE_SEPARATOR>>>".
+        4. Process every page provided and return one JSON object per page in the list.
+        5. Adhere STRICTLY to the provided schema. Do not add any extra fields or information."""
 
     except Exception as e:
         logger.error(f"Failed to initialize Gemini client: {e}")
         browser.quit()
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return None
 
     # =========== Run the scraper ===========
     try:
         data = scrape_lectures(browser, model_name, system_prompt)
-        return jsonify({"status": "success", "data": data}), 200
+        return data
     except Exception as e:
         logger.error(f"An error occurred: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return None
     finally:
         browser.quit()
 
 
+def main():
+    # =========== Run the scraper ===========
+    data = run_scraper()
+    if not data:
+        logger.error("No data scraped.")
+        return
+
+    # =========== Send emails ===========
+
+
 if __name__ == "__main__":
-    # data = run_scraper()
-    # with open("lectures_data.json", "w", encoding="utf-8") as f:
-    #     json.dump(data, f, ensure_ascii=False, indent=2)
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    main()
