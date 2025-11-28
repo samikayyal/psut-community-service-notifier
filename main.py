@@ -260,6 +260,7 @@ def run_scraper() -> list[dict] | None:
 def main():
     # =========== Run the scraper ===========
     current_lectures = run_scraper()
+    logger.info(f"Scraped these: {current_lectures}")
     if current_lectures is None:
         logger.error("Scraper failed to run.")
         return jsonify({"error": "Scraper failed to run."}), 500
