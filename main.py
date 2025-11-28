@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from helpers import clean_html, parse_gemini_error
+from send_emails import send_brevo_email
 
 load_dotenv()
 
@@ -257,6 +258,11 @@ def main():
         return
 
     # =========== Send emails ===========
+    message, success = send_brevo_email(data)
+    if success:
+        logger.info("Emails sent successfully.")
+    else:
+        logger.error(f"Failed to send emails: {message}")
 
 
 if __name__ == "__main__":
