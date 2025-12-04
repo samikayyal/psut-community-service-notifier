@@ -15,3 +15,5 @@ lectures*.json
 temp*
 ssh*
 notes.txt
+
+email_preview.html
