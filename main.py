@@ -1,14 +1,15 @@
 import json
-import logging
 import os
 import time
+import traceback
+from datetime import datetime, timedelta
 
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -19,6 +20,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 import logger_setup
 from helpers import (
     clean_html,
+    close_notifications,
     load_previous_lectures,
     parse_gemini_error,
     save_lectures_to_gcs,
@@ -67,24 +69,86 @@ class LectureData(BaseModel):
     )
 
 
-def close_notifications(browser):
-    """Close the notification box if it exists"""
-    try:
-        notification_close = WebDriverWait(browser, 5).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "/html/body/div[3]/div/div[5]/div/div/div[1]/button/span")
-            )
-        )
-
-        time.sleep(1)
-        notification_close.click()
-    except NoSuchElementException:
-        logger.info("No notification close button found, continuing...")
-
-
 def scrape_lectures(
-    browser: Chrome, model_name: str, system_prompt: str = ""
+    browser: Chrome, model_name: str, system_prompt: str, lecture_hrefs: list[str]
 ) -> list[dict]:
+    lectures_html_pages = []
+    lectures_data = []
+    original_window = browser.current_window_handle
+    try:
+        for href in lecture_hrefs:
+            # Open the link in a new tab
+            browser.execute_script("window.open(arguments[0]);", href)
+
+            # Switch to the new tab
+            browser.switch_to.window(browser.window_handles[-1])
+            # Wait for the page to load - wait for body first, then the dynamic element
+            WebDriverWait(browser, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            # Small delay to allow JavaScript to initialize dynamic content
+            time.sleep(1)
+
+            page_content = clean_html(browser.page_source)
+            # Get the data needed from Gemini:
+            lectures_html_pages.append(page_content)
+
+            # Close the tab if we're not on the original window
+            if browser.current_window_handle != original_window:
+                browser.close()
+            # Switch back to the original window
+            browser.switch_to.window(original_window)
+            # Small delay to let the browser stabilize
+            time.sleep(0.5)
+
+        # Split the pages into batches to avoid token limits
+        # Use a minimum batch size of 5, or all pages if fewer than 5
+        batch_size = max(5, (len(lectures_html_pages) + 1) // 2)
+        for i in range(0, len(lectures_html_pages), batch_size):
+            batch_pages = lectures_html_pages[i : i + batch_size]
+            combined_pages = "\n\n<<<NEXT_PAGE_SEPARATOR>>>\n\n".join(batch_pages)
+
+            try:
+                client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
+                response = client.models.generate_content(
+                    model=model_name,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        response_mime_type="application/json",
+                        response_schema=list[LectureData],
+                    ),
+                    contents=[
+                        f"""
+                    Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
+                    The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
+                    Here are the HTML pages:
+
+                    {combined_pages}"""
+                    ],
+                )
+                if response.text is None:
+                    raise Exception("Gemini API returned no text in the response.")
+                batch_data = json.loads(response.text)
+                lectures_data.extend(batch_data)
+                logger.info(f"Processed batch of {len(batch_data)} lectures")
+
+            except errors.APIError as e:
+                raise Exception(f"Gemini API Error: {parse_gemini_error(e)}")
+
+            # Parse the response and add to lectures_data
+
+        logger.info(f"Done Scraping {len(lectures_data)} lectures")
+        return lectures_data
+    except Exception as e:
+        logger.error(f"An error occurred while collecting lecture information: {e}")
+        # print the stack trace for debugging
+
+        traceback.print_exc()
+        raise
+
+
+def scrape_hrefs(browser: Chrome) -> list[str]:
     browser.get("https://portal.psut.edu.jo")
 
     # Define wait object
@@ -114,86 +178,64 @@ def scrape_lectures(
     # I have to close the noti box again
     close_notifications(browser)
 
-    # find the community service lectures
-    div = wait.until(EC.presence_of_element_located((By.ID, "cCarousel")))
-    lectures = div.find_elements(By.TAG_NAME, "article")
+    # go to the lectures page
+    # Find activites card and click it
+    activities_card = WebDriverWait(browser, 10).until(
+        EC.presence_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "body > div.app-content.content > div > div:nth-child(3) > div > div > div > div > a:nth-child(3)",
+            )
+        )
+    )
+    activities_card.click()
 
-    original_window = browser.current_window_handle
+    # switch to the new tab
+    browser.switch_to.window(browser.window_handles[-1])
 
-    # Collect all hrefs first to avoid stale element issues
-    lecture_hrefs = []
-    for lecture in lectures:
-        try:
-            link = lecture.find_element(By.TAG_NAME, "a")
-            href = link.get_attribute("href")
-            if href:
-                lecture_hrefs.append(href)
-        except Exception as e:
-            logger.warning(f"Could not get href from lecture: {e}")
+    # Wait for the activites timeline to load
+    WebDriverWait(browser, 10).until(
+        EC.presence_of_element_located((By.CLASS_NAME, "events"))
+    )
 
-    lectures_data: list[dict] = []
-    lectures_html_pages: list[str] = []
-    # Collect html content of each lecture
-    try:
-        for href in lecture_hrefs:
-            # Open the link in a new tab
-            browser.execute_script("window.open(arguments[0]);", href)
+    # Loop through available dates and get lectures with minimum date today
+    timeline_div = browser.find_element(By.CLASS_NAME, "events")
+    list_items = timeline_div.find_elements(By.TAG_NAME, "li")
 
-            # Switch to the new tab
-            browser.switch_to.window(browser.window_handles[-1])
-            time.sleep(5)  # Wait for the page to load
-            page_content = clean_html(browser.page_source)
-            # Get the data needed from Gemini:
-            lectures_html_pages.append(page_content)
+    lecture_hrefs: list[str] = []
 
-            # Close the tab if we're not on the original window
-            if browser.current_window_handle != original_window:
-                browser.close()
-            # Switch back to the original window
-            browser.switch_to.window(original_window)
-            # Small delay to let the browser stabilize
-            time.sleep(0.5)
+    for li in list_items:
+        anchor = li.find_element(By.TAG_NAME, "a")
+        date = anchor.get_attribute("data-date") or "10/10/1970"
+        date_obj = datetime.strptime(date, "%d/%m/%Y").date()
 
-        # Split the pages into 2 batches to avoid token limits
-        batch_size = len(lectures_html_pages) // 2 + 1
-        for i in range(0, len(lectures_html_pages), batch_size):
-            batch_pages = lectures_html_pages[i : i + batch_size]
-            combined_pages = "\n\n<<<NEXT_PAGE_SEPARATOR>>>\n\n".join(batch_pages)
+        # Only click if today or in the future
+        if date_obj < datetime.now().date():
+            continue
 
-            try:
-                client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
-                response = client.models.generate_content(
-                    model=model_name,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
-                        response_mime_type="application/json",
-                        response_schema=list[LectureData],
-                    ),
-                    contents=[
-                        f"""
-                    Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
-                    The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
-                    Here are the HTML pages:
+        # Dont click if its selected (get from class)
+        if "selected" not in (anchor.get_attribute("class") or ""):
+            # use JavaScript click to avoid ElementNotInteractableException
+            browser.execute_script("arguments[0].click();", anchor)
 
-                    {combined_pages}"""
-                    ],
-                )
-                data = response.model_dump_json()
-                batch_data = json.loads(data)
-                lectures_data.extend(batch_data)
-                logger.info(f"Processed batch of {len(batch_data)} lectures")
+        content_div = WebDriverWait(browser, 10).until(
+            EC.presence_of_element_located((By.ID, "event-content"))
+        )
 
-            except errors.APIError as e:
-                raise Exception(f"Gemini API Error: {parse_gemini_error(e)}")
+        # Another wait to make sure card is loaded
+        WebDriverWait(content_div, 10).until(
+            EC.visibility_of_element_located((By.CLASS_NAME, "card"))
+        )
 
-            # Parse the response and add to lectures_data
+        # Could be multiple lectures on the same day
+        mini_soup = BeautifulSoup(content_div.get_attribute("innerHTML"), "lxml")
+        lecture_titles = mini_soup.find_all("h4", class_="card-title")
+        for title in lecture_titles:
+            anchor = title.find("a")
+            if anchor and anchor.has_attr("href"):
+                lecture_hrefs.append(anchor["href"])
 
-        logger.info(f"Scraped {len(lectures_data)} lectures")
-        return lectures_data
-    except Exception as e:
-        logger.error(f"An error occurred while collecting lecture information: {e}")
-        raise
+    return lecture_hrefs
 
 
 def run_scraper() -> list[dict] | None:
@@ -218,7 +260,7 @@ def run_scraper() -> list[dict] | None:
 
         service = Service()
 
-        if os.getenv("IS_DOCKER"):
+        if os.getenv("IS_DOCKER", "").lower() == "true":
             options.binary_location = "/usr/bin/chromium"
             service = Service(executable_path="/usr/bin/chromedriver")
 
@@ -227,30 +269,27 @@ def run_scraper() -> list[dict] | None:
         logger.error(f"Failed to initialize the browser: {e}")
         return None
 
-    # =========== Create gemini client ===========
-    try:
-        model_name = "gemini-2.5-flash"
-        system_prompt = """
-        You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
+    # =========== Prompt and model details ===========
 
-        Rules:
-        1. If a field is not found, set the value to null.
-        2. Preserve all Arabic text exactly as it appears. Do not translate Arabic to English.
-        3. You will receive multiple HTML pages separated by the delimiter: "<<<NEXT_PAGE_SEPARATOR>>>".
-        4. Process every page provided and return one JSON object per page in the list.
-        5. Adhere STRICTLY to the provided schema. Do not add any extra fields or information."""
+    model_name = "gemini-2.5-flash"
+    system_prompt = """
+    You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
 
-    except Exception as e:
-        logger.error(f"Failed to initialize Gemini client: {e}")
-        browser.quit()
-        return None
+    Rules:
+    1. If a field is not found, set the value to null.
+    2. Preserve all Arabic text exactly as it appears. Do not translate Arabic to English.
+    3. You will receive multiple HTML pages separated by the delimiter: "<<<NEXT_PAGE_SEPARATOR>>>".
+    4. Process every page provided and return one JSON object per page in the list.
+    5. Adhere STRICTLY to the provided schema. Do not add any extra fields or information."""
 
     # =========== Run the scraper ===========
     try:
-        data = scrape_lectures(browser, model_name, system_prompt)
+        hrefs = scrape_hrefs(browser)
+        logger.info(f"Found {len(hrefs)} lecture links to scrape.")
+        data = scrape_lectures(browser, model_name, system_prompt, hrefs)
         return data
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}:\n\n{traceback.format_exc()}")
         return None
     finally:
         browser.quit()
@@ -258,9 +297,11 @@ def run_scraper() -> list[dict] | None:
 
 @app.route("/", methods=["GET", "POST"])
 def main():
+    logger.info("Starting scraper process...")
     # =========== Run the scraper ===========
     current_lectures = run_scraper()
-    logger.info(f"Scraped these: {current_lectures}")
+    if not os.getenv("IS_DOCKER", "").lower() == "true":
+        logger.info(f"Scraped these: {current_lectures}")
     if current_lectures is None:
         logger.error("Scraper failed to run.")
         return jsonify({"error": "Scraper failed to run."}), 500
@@ -290,6 +331,11 @@ def main():
         return jsonify({"message": "No new lectures found."}), 200
 
     logger.info(f"Found {len(new_lectures)} new lectures.")
+
+    # Save them locally if not running in docker
+    if not os.getenv("IS_DOCKER", "").lower() == "true":
+        with open("lectures.json", "w", encoding="utf-8") as f:
+            json.dump(new_lectures, f, ensure_ascii=False, indent=4)
 
     # =========== Send emails ===========
     message, success = send_brevo_email(new_lectures)

@@ -1,10 +1,15 @@
 import json
 import os
 import re
+import time
 
 from bs4 import BeautifulSoup
 from google.cloud import storage
 from google.genai import errors
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from logger_setup import logger
 
@@ -84,3 +89,20 @@ def save_lectures_to_gcs(lectures: list[dict]):
         logger.info("Saved lectures to GCS")
     except Exception as e:
         logger.error(f"Could not save lectures to GCS: {e}")
+
+
+def close_notifications(browser):
+    """Close the notification box if it exists"""
+    try:
+        notification_close = WebDriverWait(browser, 5).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "/html/body/div[3]/div/div[5]/div/div/div[1]/button/span")
+            )
+        )
+
+        time.sleep(1)
+        notification_close.click()
+    except NoSuchElementException:
+        logger.info("No notification close button found, continuing...")
+    except TimeoutException:
+        logger.info("No notification close button found within timeout, continuing...")
