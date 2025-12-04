@@ -2,7 +2,7 @@ import json
 import os
 import time
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
