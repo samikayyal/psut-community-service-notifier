@@ -67,6 +67,7 @@ class LectureData(BaseModel):
     officer_phone: str | None = Field(
         description="Phone number of the officer in charge, marked under Activity Officer"
     )
+    href: str | None = Field(description="The source URL of the lecture page")
 
 
 def scrape_lectures(
@@ -90,8 +91,10 @@ def scrape_lectures(
             time.sleep(1)
 
             page_content = clean_html(browser.page_source)
+            # Add the href to the page content so Gemini can extract it
+            page_content_with_href = f"Source URL: {href}\n{page_content}"
             # Get the data needed from Gemini:
-            lectures_html_pages.append(page_content)
+            lectures_html_pages.append(page_content_with_href)
 
             # Close the tab if we're not on the original window
             if browser.current_window_handle != original_window:
@@ -121,7 +124,8 @@ def scrape_lectures(
                     contents=[
                         f"""
                     Extract all information from the html pages mentioned in the schema, adhere to it STRICTLY.
-                    The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone.
+                    The information you have to extract is: title, date, time, location, activity_hours, restrictions, max_registrations, current_registrations, start_date, end_date, officer_name, officer_email, officer_phone, href.
+                    Note: The href (Source URL) is provided at the top of each page content.
                     Here are the HTML pages:
 
                     {combined_pages}"""
@@ -313,16 +317,13 @@ def main():
     # =========== Check for new lectures ===========
     previous_lectures = load_previous_lectures()
 
-    # Create a set of unique keys for previous lectures
-    # We use title, date, and time as the unique identifier
-    prev_keys = {
-        (lecture.get("title"), lecture.get("date"), lecture.get("time"))
-        for lecture in previous_lectures
-    }
+    # Create a unique key for previous lectures
+    # We use href as the unique identifier
+    prev_keys = {lecture.get("href") for lecture in previous_lectures}
 
     new_lectures = []
     for lecture in current_lectures:
-        key = (lecture.get("title"), lecture.get("date"), lecture.get("time"))
+        key = lecture.get("href")
         if key not in prev_keys:
             new_lectures.append(lecture)
 
