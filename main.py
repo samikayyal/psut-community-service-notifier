@@ -344,7 +344,7 @@ def main():
         logger.info("Emails sent successfully.")
         # Only save the new state if emails were sent successfully
         # This ensures that if email sending fails, we'll try again next time
-        save_lectures_to_gcs(current_lectures)
+        save_lectures_to_gcs(previous_lectures + new_lectures)
         return jsonify({"message": message}), 200
     else:
         logger.error(f"Failed to send emails: {message}")
