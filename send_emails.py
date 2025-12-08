@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -11,6 +12,15 @@ def generate_lecture_card(lec: dict) -> str:
     """Generate HTML card for a single lecture"""
     title = lec.get("title") or "Untitled Event"
     date = lec.get("date") or "Date not specified"
+
+    if date != "Date not specified":
+        try:
+            date_obj = datetime.strptime(date, "%d/%m/%Y")
+            day_name = date_obj.strftime("%A")
+            date = f"{day_name}, {date}"
+        except ValueError:
+            pass
+
     time_val = lec.get("time") or "Time not specified"
     location = lec.get("location") or "Location not specified"
     activity_hours = lec.get("activity_hours")
