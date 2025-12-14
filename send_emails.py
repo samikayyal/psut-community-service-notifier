@@ -5,6 +5,8 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
+from google_sheets import fetch_recipients_from_sheet
+
 load_dotenv()
 
 
@@ -160,15 +162,17 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
     """
     api_key = os.getenv("BREVO_API_KEY")
     sender_email = os.getenv("SENDER_EMAIL")
-    # emails are comma-separated in recipients.txt
-    with open("recipients.txt", "r") as f:
-        recipients_str = f.read().strip()
 
-    recipients = [email.strip() for email in recipients_str.split(",") if email.strip()]
+    # Fetch recipients from Google Sheet
+    try:
+        recipients = fetch_recipients_from_sheet()
+    except Exception as e:
+        return f"Failed to fetch recipients from Google Sheet: {e}", False
+
     if not api_key or not sender_email:
         return "Brevo configuration missing in .env", False
     if not recipients:
-        return "No recipients found in recipients.txt", False
+        return "No recipients found in Google Sheet", False
 
     # 1. Generate lecture cards
     lecture_cards = ""

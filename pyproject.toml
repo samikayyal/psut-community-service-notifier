@@ -7,8 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.2",
     "flask>=3.1.2",
+    "google-auth>=2.43.0",
     "google-cloud-storage>=3.6.0",
     "google-genai>=1.52.0",
+    "gspread>=6.2.1",
     "gunicorn>=23.0.0",
     "lxml>=6.0.2",
     "python-dotenv>=1.2.1",
