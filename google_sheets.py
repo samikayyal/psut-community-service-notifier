@@ -11,12 +11,20 @@ def get_google_sheets_client() -> gspread.Client:
         "https://www.googleapis.com/auth/spreadsheets.readonly",
     ]
 
-    # Look for service account file
-    service_account_path = Path("avid-subject-479313-r6-e5902510883d.json")
+    # Check for credentials path from environment variable (Cloud Run Secret Manager)
+    # or fall back to local file for development
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if creds_path and Path(creds_path).exists():
+        service_account_path = Path(creds_path)
+    else:
+        # Fall back to local file for development
+        service_account_path = Path("avid-subject-479313-r6-e5902510883d.json")
 
     if not service_account_path.exists():
         raise FileNotFoundError(
-            "service_account.json not found. Please download it from Google Cloud Console."
+            f"Service account credentials not found. "
+            f"Set GOOGLE_APPLICATION_CREDENTIALS env var or place the JSON file locally."
         )
 
     credentials = Credentials.from_service_account_file(
