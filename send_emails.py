@@ -207,7 +207,8 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
     """
 
     # 2. Prepare Brevo Payload
-    recipients = [{"email": email.strip()} for email in recipients if email.strip()]
+    # Use BCC to hide recipients from each other
+    bcc_recipients = [{"email": email.strip()} for email in recipients if email.strip()]
 
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
@@ -217,7 +218,8 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
     }
     payload = {
         "sender": {"name": "Community Service", "email": sender_email},
-        "to": recipients,
+        "to": [{"email": sender_email}],  # Send to yourself
+        "bcc": bcc_recipients,  # All actual recipients in BCC (hidden from each other)
         "subject": f"PSUT Lectures Update: {len(lectures)} Found",
         "htmlContent": email_body,
     }
