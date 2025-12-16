@@ -275,7 +275,7 @@ def run_scraper() -> list[dict] | None:
 
     # =========== Prompt and model details ===========
 
-    model_name = "gemini-2.5-flash"
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
     system_prompt = """
     You are a high-precision HTML scraping agent. Your goal is to extract structured data from raw HTML code.
 
