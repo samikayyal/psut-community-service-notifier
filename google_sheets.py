@@ -23,8 +23,8 @@ def get_google_sheets_client() -> gspread.Client:
 
     if not service_account_path.exists():
         raise FileNotFoundError(
-            f"Service account credentials not found. "
-            f"Set GOOGLE_APPLICATION_CREDENTIALS env var or place the JSON file locally."
+            "Service account credentials not found. "
+            "Set GOOGLE_APPLICATION_CREDENTIALS env var or place the JSON file locally."
         )
 
     credentials = Credentials.from_service_account_file(
@@ -68,7 +68,7 @@ def fetch_recipients_from_sheet(
         worksheet = spreadsheet.get_worksheet(0)
     except gspread.SpreadsheetNotFound:
         raise ValueError(
-            f"Spreadsheet not found. Make sure the sheet is shared with the service account."
+            "Spreadsheet not found. Make sure the sheet is shared with the service account."
         )
 
     # Get all values from the email column (skip header row)

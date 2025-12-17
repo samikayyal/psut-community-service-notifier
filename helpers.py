@@ -50,7 +50,12 @@ def get_gcs_bucket() -> storage.Bucket | None:
     # If running locally without GCS configured, this might fail if credentials aren't set up.
     # We'll assume the environment is configured correctly for Cloud Run.
     try:
-        client = storage.Client()
+        if os.path.exists("avid-subject-479313-r6-e5902510883d.json"):
+            client = storage.Client.from_service_account_json(
+                "avid-subject-479313-r6-e5902510883d.json"
+            )
+        else:
+            client = storage.Client()
         bucket_name = os.getenv("GCS_BUCKET_NAME")
         if not bucket_name:
             logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")

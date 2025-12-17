@@ -165,7 +165,11 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
 
     # Fetch recipients from Google Sheet
     try:
-        recipients = fetch_recipients_from_sheet()
+        if os.getenv("TESTING_MODE", "false").lower() == "true":
+            # In testing mode, use a fixed test email
+            recipients = ["sam20220837@std.psut.edu.jo", "kayyal.sami0140@gmail.com"]
+        else:
+            recipients = fetch_recipients_from_sheet()
     except Exception as e:
         return f"Failed to fetch recipients from Google Sheet: {e}", False
 
@@ -199,6 +203,7 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
             <div style="text-align: center; padding: 20px; color: #888; font-size: 12px;">
                 <p style="margin: 0;">This is an automated notification from PSUT Community Service Notifier</p>
                 <p style="margin: 8px 0 0 0;">Register quickly as spots fill up fast! 🚀</p>
+                <p style="margin: 8px 0 0 0;">For support or inquiries: <a href="https://wa.me/962782145605" target="_blank" rel="noopener noreferrer" style="color: #25D366; text-decoration: none;">WhatsApp: +962782145605</a></p>
             </div>
             
         </div>
