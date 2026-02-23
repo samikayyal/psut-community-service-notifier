@@ -181,6 +181,22 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
     # 1. Generate lecture cards
     lecture_cards = ""
     for lec in lectures:
+        max_reg = lec.get("max_registrations")
+        current_reg = lec.get("current_registrations")
+        if max_reg is not None and current_reg is not None and current_reg >= max_reg:
+            continue  # Skip full events
+
+        end_date = lec.get("end_date")
+        if end_date:
+            # If end_date is in the past, skip this lecture
+            try:
+                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
+                if end_date_obj < datetime.now().date():
+                    continue  # Skip expired lectures
+            except ValueError:
+                # If parsing fails, assume the lecture is still valid
+                pass
+
         lecture_cards += generate_lecture_card(lec)
 
     email_body = f"""
