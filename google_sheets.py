@@ -36,15 +36,15 @@ def get_google_sheets_client() -> gspread.Client:
 
 def fetch_recipients_from_sheet(
     sheet_id: str | None = None,
-    sheet_name: str = "Form Responses 1",
-    email_column: int = 2,
+    sheet_name: str = "Recipients",
+    email_column: int = 1,
 ) -> list[str]:
     """
     Fetch email addresses from a Google Sheet.
 
     Args:
         sheet_id: The Google Sheet ID (from URL). If None, reads from GOOGLE_SHEET_ID env var.
-        sheet_name: Name of the worksheet/tab (default: "Form Responses 1" for Google Forms).
+        sheet_name: Name of the worksheet/tab (default: "Recipients").
         email_column: Column number containing emails (1-indexed, default: 2 for typical forms).
 
     Returns:
