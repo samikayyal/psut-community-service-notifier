@@ -199,6 +199,9 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
 
         lecture_cards += generate_lecture_card(lec)
 
+    if not lecture_cards.strip():
+        return "No available lectures to email (all were full or expired).", True
+
     email_body = f"""
     <!DOCTYPE html>
     <html lang="en">
