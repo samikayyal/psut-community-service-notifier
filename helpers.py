@@ -96,6 +96,29 @@ def save_lectures_to_gcs(lectures: list[dict]):
         logger.error(f"Could not save lectures to GCS: {e}")
 
 
+def save_screenshot_to_gcs(browser, filename: str):
+    """Save a screenshot to GCS"""
+    try:
+        bucket = get_gcs_bucket()
+        if not bucket:
+            return
+        
+        # Save screenshot locally first
+        local_path = f"/tmp/{filename}" if os.getenv("IS_DOCKER", "").lower() == "true" else filename
+        browser.save_screenshot(local_path)
+        
+        blob = bucket.blob(filename)
+        blob.upload_from_filename(local_path, content_type="image/png")
+        logger.info(f"Saved screenshot {filename} to GCS")
+        
+        # Cleanup
+        if os.path.exists(local_path):
+            os.remove(local_path)
+            
+    except Exception as e:
+        logger.error(f"Could not save screenshot to GCS: {e}")
+
+
 def close_notifications(browser):
     """Close the notification box if it exists"""
     try:

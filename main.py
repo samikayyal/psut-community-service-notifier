@@ -22,6 +22,7 @@ from helpers import (
     load_previous_lectures,
     parse_gemini_error,
     save_lectures_to_gcs,
+    save_screenshot_to_gcs,
 )
 from send_emails import send_brevo_email
 
@@ -175,6 +176,8 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     LOGIN_URLS = {"https://portal.psut.edu.jo/", "https://portal.psut.edu.jo"}
     WebDriverWait(browser, 45).until(lambda d: d.current_url not in LOGIN_URLS)
 
+    save_screenshot_to_gcs(browser, "1_after_login.png")
+
     # Save screenshot for debugging
     if os.getenv("TESTING_MODE", "false").lower() == "true":
         os.makedirs("debugging", exist_ok=True)
@@ -185,6 +188,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
             f.write(browser.page_source)
 
     close_notifications(browser)
+    save_screenshot_to_gcs(browser, "2_after_closing_notifications.png")
 
     # Change language to English
     dropdown = wait.until(EC.presence_of_element_located((By.ID, "dropdown-flag")))
@@ -195,9 +199,13 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
         )
     )
     english_option.click()
+    
+    time.sleep(2)
+    save_screenshot_to_gcs(browser, "3_after_changing_language.png")
 
     # I have to close the noti box again
     close_notifications(browser)
+    save_screenshot_to_gcs(browser, "4_after_closing_notifications_again.png")
 
     # go to the lectures page
     # Find activites card and click it
