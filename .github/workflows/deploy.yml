@@ -9,7 +9,7 @@ env:
   PROJECT_ID: community-service-494514
   REGION: me-west1
   SERVICE_NAME: psut-community-service-notifier
-  IMAGE: gcr.io/community-service-494514/psut-community-service-notifier
+  IMAGE: me-west1-docker.pkg.dev/community-service-494514/scraper-images/psut-community-service-notifier
 
 jobs:
   deploy:
