@@ -10,9 +10,7 @@ from flask import Flask, jsonify
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
-from selenium.webdriver import Chrome
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -71,7 +69,7 @@ class LectureData(BaseModel):
 
 
 def scrape_lectures(
-    browser: Chrome, model_name: str, system_prompt: str, lecture_hrefs: list[str]
+    browser: uc.Chrome, model_name: str, system_prompt: str, lecture_hrefs: list[str]
 ) -> list[dict]:
     lectures_html_pages = []
     lectures_data = []
@@ -152,7 +150,7 @@ def scrape_lectures(
         raise
 
 
-def scrape_hrefs(browser: Chrome) -> list[str]:
+def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     browser.get("https://portal.psut.edu.jo")
 
     # Define wait object
@@ -165,7 +163,29 @@ def scrape_hrefs(browser: Chrome) -> list[str]:
     username_input.send_keys(USERNAME)
     password_input.send_keys(PASSWORD)
 
-    password_input.submit()
+    # Click the submit button so the JS handler fires (which populates the
+    # reCAPTCHA token before submitting). Calling .submit() directly bypasses
+    # the JS handler and sends an empty g-recaptcha-response, causing
+    # "Security check failed".
+    submit_btn = browser.find_element(By.ID, "submitBtn")
+    submit_btn.click()
+
+    # Wait for reCAPTCHA to execute, form to submit, and browser to redirect.
+    # Login page is always at the root path; any other URL means we succeeded.
+    LOGIN_URLS = {"https://portal.psut.edu.jo/", "https://portal.psut.edu.jo"}
+    WebDriverWait(browser, 45).until(
+        lambda d: d.current_url not in LOGIN_URLS
+    )
+
+
+    # Save screenshot for debugging
+    if os.getenv("TESTING_MODE", "false").lower() == "true":
+        os.makedirs("debugging", exist_ok=True)
+        browser.save_screenshot("debugging/after_login.png")
+
+        # Save html
+        with open("debugging/after_login.html", "w", encoding="utf-8") as f:
+            f.write(browser.page_source)
 
     close_notifications(browser)
 
@@ -246,31 +266,42 @@ def run_scraper() -> list[dict] | None:
     if not USERNAME or not PASSWORD:
         raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
 
+    is_docker = os.getenv("IS_DOCKER", "").lower() == "true"
+
+    # =========== Virtual display (Docker / Cloud Run only) ===========
+    # Cloud Run has no physical display. We start an Xvfb virtual framebuffer
+    # so Chrome can run in headful mode (required for reCAPTCHA v3 to score well).
+    display = None
+    if is_docker:
+        from pyvirtualdisplay import Display
+        display = Display(visible=False, size=(1920, 1080))
+        display.start()
+
     # =========== Create the browser ===========
     try:
-        options = Options()
-        options.add_argument("--headless=new")
-        # I have to add these because headless without them doesnt work
+        options = uc.ChromeOptions()
+        # NOT headless — reCAPTCHA v3 gives near-zero scores to headless browsers.
+        # Xvfb provides the virtual display on Cloud Run instead.
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--start-maximized")
-        options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-
-        # Additions for Docker/Cloud Run
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
 
-        service = Service()
-
-        if os.getenv("IS_DOCKER", "").lower() == "true":
+        if is_docker:
             options.binary_location = "/usr/bin/chromium"
-            service = Service(executable_path="/usr/bin/chromedriver")
+            browser = uc.Chrome(
+                options=options,
+                driver_executable_path="/usr/bin/chromedriver",
+            )
+        else:
+            browser = uc.Chrome(options=options, version_main=147)
 
-        browser = Chrome(service=service, options=options)
+
     except Exception as e:
         logger.error(f"Failed to initialize the browser: {e}")
+        if display:
+            display.stop()
         return None
 
     # =========== Prompt and model details ===========
@@ -297,6 +328,9 @@ def run_scraper() -> list[dict] | None:
         return None
     finally:
         browser.quit()
+        if display:
+            display.stop()
+
 
 
 @app.route("/", methods=["GET", "POST"])

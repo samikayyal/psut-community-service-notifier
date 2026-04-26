@@ -16,4 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
     "selenium>=4.38.0",
+    "undetected-chromedriver>=3.5.5",
+    "pyvirtualdisplay>=3.0",
+    "setuptools>=82.0.1",
 ]

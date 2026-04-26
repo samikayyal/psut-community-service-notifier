@@ -638,8 +638,11 @@ dependencies = [
     { name = "gunicorn" },
     { name = "lxml" },
     { name = "python-dotenv" },
+    { name = "pyvirtualdisplay" },
     { name = "requests" },
     { name = "selenium" },
+    { name = "setuptools" },
+    { name = "undetected-chromedriver" },
 ]
 
 [package.metadata]
@@ -653,8 +656,11 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "pyvirtualdisplay", specifier = ">=3.0" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "selenium", specifier = ">=4.38.0" },
+    { name = "setuptools", specifier = ">=82.0.1" },
+    { name = "undetected-chromedriver", specifier = ">=3.5.5" },
 ]
 
 [[package]]
@@ -792,6 +798,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyvirtualdisplay"
+version = "3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/9f/23e5a82987c26d225139948a224a93318d7a7c8b166d4dbe4de7426dc4e4/PyVirtualDisplay-3.0.tar.gz", hash = "sha256:09755bc3ceb6eb725fb07eca5425f43f2358d3bf08e00d2a9b792a1aedd16159", size = 18560 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/90/eb/c3b8deb661cb3846db63288c99bbb39f217b7807fc8acb2fd058db41e2e6/PyVirtualDisplay-3.0-py3-none-any.whl", hash = "sha256:40d4b8dfe4b8de8552e28eb367647f311f88a130bf837fe910e7f180d5477f0e", size = 15258 },
+]
+
+[[package]]
 name = "requests"
 version = "2.32.5"
 source = { registry = "https://pypi.org/simple" }
@@ -846,6 +861,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/a0/60a5e7e946420786d57816f64536e21a29f0554706b36f3cba348107024c/selenium-4.38.0.tar.gz", hash = "sha256:c117af6727859d50f622d6d0785b945c5db3e28a45ec12ad85cee2e7cc84fc4c", size = 924101 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/d3/76c8f4a8d99b9f1ebcf9a611b4dd992bf5ee082a6093cfc649af3d10f35b/selenium-4.38.0-py3-none-any.whl", hash = "sha256:ed47563f188130a6fd486b327ca7ba48c5b11fb900e07d6457befdde320e35fd", size = 9694571 },
+]
+
+[[package]]
+name = "setuptools"
+version = "82.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/db/cfac1baf10650ab4d1c111714410d2fbb77ac5a616db26775db562c8fab2/setuptools-82.0.1.tar.gz", hash = "sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9", size = 1152316 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb", size = 1006223 },
 ]
 
 [[package]]
@@ -935,6 +959,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611 },
 ]
+
+[[package]]
+name = "undetected-chromedriver"
+version = "3.5.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "selenium" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/98/7ab46625ce2317756e4e857fe6ac24b6378c3e8f477da26c95226ed8ccb7/undetected-chromedriver-3.5.5.tar.gz", hash = "sha256:9f945e1435005247abe17de316bcfda85b284a4177fd5f25167c78ced33b65ec", size = 65409 }
 
 [[package]]
 name = "urllib3"

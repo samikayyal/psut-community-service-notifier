@@ -1,15 +1,16 @@
 FROM python:3.12-slim
 
-# Install Chromium, Driver, and specific font/audio libs required for Headless
+# Install Chromium, ChromeDriver, Xvfb (virtual display), and required libs.
+# Xvfb lets Chrome run in headful mode (needed for reCAPTCHA v3) without a real display.
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
     libnss3 \
     libfontconfig1 \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Environment Variables
-# ENV DISPLAY=:99
 ENV PYTHONUNBUFFERED=1
 ENV IS_DOCKER=true
 
