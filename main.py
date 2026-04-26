@@ -199,7 +199,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
         )
     )
     english_option.click()
-    
+
     time.sleep(2)
     save_screenshot_to_gcs(browser, "3_after_changing_language.png")
 

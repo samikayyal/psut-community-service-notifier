@@ -100,21 +100,29 @@ def save_screenshot_to_gcs(browser, filename: str):
     """Save a screenshot to GCS"""
     try:
         bucket = get_gcs_bucket()
+        logger.info("Saving screenshot to GCS")
+        logger.info(f"Bucket: {bucket}")
         if not bucket:
+            logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")
             return
-        
+
         # Save screenshot locally first
-        local_path = f"/tmp/{filename}" if os.getenv("IS_DOCKER", "").lower() == "true" else filename
+        local_path = (
+            f"/tmp/{filename}"
+            if os.getenv("IS_DOCKER", "").lower() == "true"
+            else filename
+        )
+        logger.info(f"Local path: {local_path}")
         browser.save_screenshot(local_path)
-        
+
         blob = bucket.blob(filename)
         blob.upload_from_filename(local_path, content_type="image/png")
         logger.info(f"Saved screenshot {filename} to GCS")
-        
+
         # Cleanup
         if os.path.exists(local_path):
             os.remove(local_path)
-            
+
     except Exception as e:
         logger.error(f"Could not save screenshot to GCS: {e}")
 
