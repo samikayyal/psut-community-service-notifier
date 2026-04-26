@@ -4,13 +4,13 @@ import time
 import traceback
 from datetime import datetime
 
+import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
-import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -173,10 +173,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     # Wait for reCAPTCHA to execute, form to submit, and browser to redirect.
     # Login page is always at the root path; any other URL means we succeeded.
     LOGIN_URLS = {"https://portal.psut.edu.jo/", "https://portal.psut.edu.jo"}
-    WebDriverWait(browser, 45).until(
-        lambda d: d.current_url not in LOGIN_URLS
-    )
-
+    WebDriverWait(browser, 45).until(lambda d: d.current_url not in LOGIN_URLS)
 
     # Save screenshot for debugging
     if os.getenv("TESTING_MODE", "false").lower() == "true":
@@ -274,6 +271,7 @@ def run_scraper() -> list[dict] | None:
     display = None
     if is_docker:
         from pyvirtualdisplay import Display
+
         display = Display(visible=False, size=(1920, 1080))
         display.start()
 
@@ -296,7 +294,6 @@ def run_scraper() -> list[dict] | None:
             )
         else:
             browser = uc.Chrome(options=options, version_main=147)
-
 
     except Exception as e:
         logger.error(f"Failed to initialize the browser: {e}")
@@ -330,7 +327,6 @@ def run_scraper() -> list[dict] | None:
         browser.quit()
         if display:
             display.stop()
-
 
 
 @app.route("/", methods=["GET", "POST"])
