@@ -301,7 +301,7 @@ def run_scraper() -> list[dict] | None:
                 driver_executable_path="/usr/bin/chromedriver",
             )
         else:
-            browser = uc.Chrome(options=options, version_main=147)
+            browser = uc.Chrome(options=options)
 
     except Exception as e:
         logger.error(f"Failed to initialize the browser: {e}")

@@ -1,9 +1,11 @@
 import json
 import os
 import re
+import sys
 import time
 
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from google.cloud import storage
 from google.genai import errors
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
@@ -12,6 +14,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from logger_setup import logger
+
+load_dotenv()
 
 
 def parse_gemini_error(e: errors.APIError) -> str:
@@ -97,34 +101,31 @@ def save_lectures_to_gcs(lectures: list[dict]):
 
 
 def save_screenshot_to_gcs(browser, filename: str):
-    """Save a screenshot to GCS"""
+    """Save a screenshot to GCS using memory instead of disk"""
+    print(f"DEBUG: save_screenshot_to_gcs called for {filename}", flush=True)
     try:
         bucket = get_gcs_bucket()
-        logger.info("Saving screenshot to GCS")
-        logger.info(f"Bucket: {bucket}")
         if not bucket:
-            logger.warning("GCS_BUCKET_NAME not set. Persistence disabled.")
+            logger.warning(f"GCS_BUCKET_NAME not set. Cannot save {filename}")
+            print(f"DEBUG: No bucket found for {filename}", flush=True)
             return
 
-        # Save screenshot locally first
-        local_path = (
-            f"/tmp/{filename}"
-            if os.getenv("IS_DOCKER", "").lower() == "true"
-            else filename
-        )
-        logger.info(f"Local path: {local_path}")
-        browser.save_screenshot(local_path)
+        logger.info(f"Taking screenshot: {filename}")
+        print(f"DEBUG: Taking screenshot for {filename}...", flush=True)
+
+        # Get screenshot as bytes directly from memory
+        screenshot_png = browser.get_screenshot_as_png()
+        print(f"DEBUG: Screenshot taken, size: {len(screenshot_png)} bytes", flush=True)
 
         blob = bucket.blob(filename)
-        blob.upload_from_filename(local_path, content_type="image/png")
-        logger.info(f"Saved screenshot {filename} to GCS")
+        blob.upload_from_string(screenshot_png, content_type="image/png")
 
-        # Cleanup
-        if os.path.exists(local_path):
-            os.remove(local_path)
+        logger.info(f"Successfully saved screenshot {filename} to GCS")
+        print(f"DEBUG: Uploaded {filename} to GCS successfully", flush=True)
 
     except Exception as e:
         logger.error(f"Could not save screenshot to GCS: {e}")
+        print(f"DEBUG: Exception in save_screenshot_to_gcs: {e}", flush=True)
 
 
 def close_notifications(browser):
