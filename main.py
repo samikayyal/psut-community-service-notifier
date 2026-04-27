@@ -11,6 +11,7 @@ from flask import Flask, jsonify
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -174,7 +175,17 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     # Wait for reCAPTCHA to execute, form to submit, and browser to redirect.
     # Login page is always at the root path; any other URL means we succeeded.
     LOGIN_URLS = {"https://portal.psut.edu.jo/", "https://portal.psut.edu.jo"}
-    WebDriverWait(browser, 45).until(lambda d: d.current_url not in LOGIN_URLS)
+
+    try:
+        # Give it a few seconds then take a peek
+        time.sleep(5)
+        save_screenshot_to_gcs(browser, "0_login_attempt.png")
+
+        WebDriverWait(browser, 40).until(lambda d: d.current_url not in LOGIN_URLS)
+    except TimeoutException:
+        save_screenshot_to_gcs(browser, "timeout_login_error.png")
+        logger.error(f"Login timed out. Current URL: {browser.current_url}")
+        raise
 
     save_screenshot_to_gcs(browser, "1_after_login.png")
 
@@ -301,7 +312,7 @@ def run_scraper() -> list[dict] | None:
                 driver_executable_path="/usr/bin/chromedriver",
             )
         else:
-            browser = uc.Chrome(options=options)
+            browser = uc.Chrome(options=options, version_main=147)
 
     except Exception as e:
         logger.error(f"Failed to initialize the browser: {e}")
