@@ -166,7 +166,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     for char in USERNAME:
         username_input.send_keys(char)
         time.sleep(0.05)
-        
+
     time.sleep(0.5)
 
     for char in PASSWORD:
@@ -182,10 +182,11 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     # the JS handler and sends an empty g-recaptcha-response, causing
     # "Security check failed".
     submit_btn = wait.until(EC.element_to_be_clickable((By.ID, "submitBtn")))
-    
+
     # Generate human-like mouse movements to boost the reCAPTCHA score
     try:
         from selenium.webdriver.common.action_chains import ActionChains
+
         actions = ActionChains(browser)
         actions.move_to_element(username_input).pause(0.5)
         actions.move_to_element(password_input).pause(0.5)
@@ -209,7 +210,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     except TimeoutException:
         save_screenshot_to_gcs(browser, "timeout_login_error.png")
         logger.error(f"Login timed out. Current URL: {browser.current_url}")
-        
+
         # Save page source for inspection
         os.makedirs("debugging", exist_ok=True)
         try:
@@ -218,7 +219,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
             logger.info("Saved page source to debugging/timeout_login_error.html")
         except Exception as e:
             logger.error(f"Could not save page source: {e}")
-            
+
         # Try to get browser logs
         try:
             logs = browser.get_log("browser")
@@ -228,7 +229,7 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
             logger.info("Saved browser logs to debugging/browser_logs.txt")
         except Exception as e:
             logger.error(f"Could not save browser logs: {e}")
-            
+
         raise
 
     save_screenshot_to_gcs(browser, "1_after_login.png")
@@ -326,13 +327,13 @@ def run_scraper() -> list[dict] | None:
     if not USERNAME or not PASSWORD:
         raise ValueError("Please set PSUT_USERNAME and PSUT_PASSWORD in the .env file.")
 
-    is_docker = os.getenv("IS_DOCKER", "").lower() == "true"
+    env = os.getenv("ENVIRONMENT", "windows").lower()
 
-    # =========== Virtual display (Docker / Cloud Run only) ===========
-    # Cloud Run has no physical display. We start an Xvfb virtual framebuffer
+    # =========== Virtual display (Linux / GCP only) ===========
+    # Headless environments need an Xvfb virtual framebuffer
     # so Chrome can run in headful mode (required for reCAPTCHA v3 to score well).
     display = None
-    if is_docker:
+    if env in ["gcp", "linux"]:
         from pyvirtualdisplay import Display
 
         display = Display(visible=False, size=(1920, 1080))
@@ -346,7 +347,7 @@ def run_scraper() -> list[dict] | None:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--start-maximized")
 
-        if is_docker:
+        if env == "gcp":
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             # Use SwiftShader instead of --disable-gpu to maintain WebGL fingerprints
@@ -358,6 +359,10 @@ def run_scraper() -> list[dict] | None:
                 options=options,
                 driver_executable_path="/usr/bin/chromedriver",
             )
+        elif env == "linux":
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            browser = uc.Chrome(options=options)
         else:
             browser = uc.Chrome(options=options, version_main=147)
 
@@ -395,20 +400,22 @@ def run_scraper() -> list[dict] | None:
             display.stop()
 
 
-@app.route("/", methods=["GET", "POST"])
-def main():
+def execute_scraper_workflow():
     logger.info("Starting scraper process...")
     # =========== Run the scraper ===========
     current_lectures = run_scraper()
-    if not os.getenv("IS_DOCKER", "").lower() == "true":
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    
+    if env != "gcp":
         logger.info(f"Scraped these: {current_lectures}")
+        
     if current_lectures is None:
         logger.error("Scraper failed to run.")
-        return jsonify({"error": "Scraper failed to run."}), 500
+        return {"error": "Scraper failed to run."}, 500
 
     if not current_lectures:
         logger.info("No lectures found on the portal.")
-        return jsonify({"message": "No lectures found on the portal."}), 200
+        return {"message": "No lectures found on the portal."}, 200
 
     # =========== Check for new lectures ===========
     previous_lectures = load_previous_lectures()
@@ -425,12 +432,12 @@ def main():
 
     if not new_lectures:
         logger.info("No new lectures found.")
-        return jsonify({"message": "No new lectures found."}), 200
+        return {"message": "No new lectures found."}, 200
 
     logger.info(f"Found {len(new_lectures)} new lectures.")
 
-    # Save them locally if not running in docker
-    if not os.getenv("IS_DOCKER", "").lower() == "true":
+    # Save them locally if not running in gcp
+    if env != "gcp":
         with open("lectures.json", "w", encoding="utf-8") as f:
             json.dump(new_lectures, f, ensure_ascii=False, indent=4)
 
@@ -441,11 +448,22 @@ def main():
         # Only save the new state if emails were sent successfully
         # This ensures that if email sending fails, we'll try again next time
         save_lectures_to_gcs(previous_lectures + new_lectures)
-        return jsonify({"message": message}), 200
+        return {"message": message}, 200
     else:
         logger.error(f"Failed to send emails: {message}")
-        return jsonify({"error": message}), 500
+        return {"error": message}, 500
+
+@app.route("/", methods=["GET", "POST"])
+def main():
+    response_data, status_code = execute_scraper_workflow()
+    return jsonify(response_data), status_code
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    if env == "linux":
+        logger.info("Running in Linux mode. Executing scraper workflow without Flask.")
+        execute_scraper_workflow()
+    else:
+        logger.info("Running in Flask mode (GCP/Windows).")
+        app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

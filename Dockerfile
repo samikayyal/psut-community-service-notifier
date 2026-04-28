@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 
 # Set Environment Variables
 ENV PYTHONUNBUFFERED=1
-ENV IS_DOCKER=true
+ENV ENVIRONMENT=gcp
 
 WORKDIR /app
 
