@@ -162,15 +162,39 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     username_input = wait.until(EC.presence_of_element_located((By.ID, "UserID")))
     password_input = browser.find_element(By.ID, "loginPass")
 
-    username_input.send_keys(USERNAME)
-    password_input.send_keys(PASSWORD)
+    # Simulate human typing
+    for char in USERNAME:
+        username_input.send_keys(char)
+        time.sleep(0.05)
+        
+    time.sleep(0.5)
+
+    for char in PASSWORD:
+        password_input.send_keys(char)
+        time.sleep(0.05)
+
+    # Crucial: Wait to let reCAPTCHA v3 scripts fully load and assign a score.
+    # Submitting too fast often sends an empty or invalid token.
+    time.sleep(2)
 
     # Click the submit button so the JS handler fires (which populates the
     # reCAPTCHA token before submitting). Calling .submit() directly bypasses
     # the JS handler and sends an empty g-recaptcha-response, causing
     # "Security check failed".
-    submit_btn = browser.find_element(By.ID, "submitBtn")
-    submit_btn.click()
+    submit_btn = wait.until(EC.element_to_be_clickable((By.ID, "submitBtn")))
+    
+    # Generate human-like mouse movements to boost the reCAPTCHA score
+    try:
+        from selenium.webdriver.common.action_chains import ActionChains
+        actions = ActionChains(browser)
+        actions.move_to_element(username_input).pause(0.5)
+        actions.move_to_element(password_input).pause(0.5)
+        actions.move_to_element(submit_btn).pause(1.0)
+        actions.click().perform()
+    except Exception as e:
+        logger.warning(f"ActionChains failed: {e}. Falling back to standard click.")
+        time.sleep(2)
+        submit_btn.click()
 
     # Wait for reCAPTCHA to execute, form to submit, and browser to redirect.
     # Login page is always at the root path; any other URL means we succeeded.
@@ -185,18 +209,38 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     except TimeoutException:
         save_screenshot_to_gcs(browser, "timeout_login_error.png")
         logger.error(f"Login timed out. Current URL: {browser.current_url}")
+        
+        # Save page source for inspection
+        os.makedirs("debugging", exist_ok=True)
+        try:
+            with open("debugging/timeout_login_error.html", "w", encoding="utf-8") as f:
+                f.write(browser.page_source)
+            logger.info("Saved page source to debugging/timeout_login_error.html")
+        except Exception as e:
+            logger.error(f"Could not save page source: {e}")
+            
+        # Try to get browser logs
+        try:
+            logs = browser.get_log("browser")
+            with open("debugging/browser_logs.txt", "w", encoding="utf-8") as f:
+                for log in logs:
+                    f.write(str(log) + "\n")
+            logger.info("Saved browser logs to debugging/browser_logs.txt")
+        except Exception as e:
+            logger.error(f"Could not save browser logs: {e}")
+            
         raise
 
     save_screenshot_to_gcs(browser, "1_after_login.png")
 
     # Save screenshot for debugging
-    if os.getenv("TESTING_MODE", "false").lower() == "true":
-        os.makedirs("debugging", exist_ok=True)
-        browser.save_screenshot("debugging/after_login.png")
+    # if os.getenv("TESTING_MODE", "false").lower() == "true":
+    #     os.makedirs("debugging", exist_ok=True)
+    #     browser.save_screenshot("debugging/after_login.png")
 
-        # Save html
-        with open("debugging/after_login.html", "w", encoding="utf-8") as f:
-            f.write(browser.page_source)
+    #     # Save html
+    #     with open("debugging/after_login.html", "w", encoding="utf-8") as f:
+    #         f.write(browser.page_source)
 
     close_notifications(browser)
     save_screenshot_to_gcs(browser, "2_after_closing_notifications.png")
@@ -301,11 +345,14 @@ def run_scraper() -> list[dict] | None:
         # Xvfb provides the virtual display on Cloud Run instead.
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--start-maximized")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
 
         if is_docker:
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            # Use SwiftShader instead of --disable-gpu to maintain WebGL fingerprints
+            # which are critical for getting a good reCAPTCHA v3 score.
+            options.add_argument("--use-gl=swiftshader")
+            options.add_argument("--enable-webgl")
             options.binary_location = "/usr/bin/chromium"
             browser = uc.Chrome(
                 options=options,
