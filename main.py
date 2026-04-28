@@ -376,7 +376,8 @@ def run_scraper() -> list[dict] | None:
             
             # NOTE: We don't specify driver_executable_path here because uc needs to patch the driver.
             # It will download a local copy to ~/.local/share/undetected_chromedriver which is writable.
-            browser = uc.Chrome(options=options)
+            # We specify version_main=147 to match your system's Chromium version.
+            browser = uc.Chrome(options=options, version_main=147)
         else:
             browser = uc.Chrome(options=options, version_main=147)
 
