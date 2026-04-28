@@ -366,12 +366,17 @@ def run_scraper() -> list[dict] | None:
         elif env == "linux":
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
-            # Explicit paths for Chromium installed via apt on Lubuntu
-            options.binary_location = "/usr/bin/chromium-browser"
-            browser = uc.Chrome(
-                options=options,
-                driver_executable_path="/usr/bin/chromedriver",
-            )
+            
+            # Use the system Chromium browser path
+            chrome_path = "/usr/bin/chromium-browser"
+            if not os.path.exists(chrome_path):
+                chrome_path = "/usr/bin/chromium"
+            
+            options.binary_location = chrome_path
+            
+            # NOTE: We don't specify driver_executable_path here because uc needs to patch the driver.
+            # It will download a local copy to ~/.local/share/undetected_chromedriver which is writable.
+            browser = uc.Chrome(options=options)
         else:
             browser = uc.Chrome(options=options, version_main=147)
 
