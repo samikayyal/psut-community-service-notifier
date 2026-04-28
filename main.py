@@ -22,7 +22,7 @@ from helpers import (
     close_notifications,
     load_previous_lectures,
     parse_gemini_error,
-    save_lectures_to_gcs,
+    save_lectures,
     save_screenshot_to_gcs,
 )
 from send_emails import send_brevo_email
@@ -256,12 +256,16 @@ def scrape_hrefs(browser: uc.Chrome) -> list[str]:
     )
     english_option.click()
 
-    time.sleep(2)
-    save_screenshot_to_gcs(browser, "3_after_changing_language.png")
+    ENV = os.getenv("ENVIRONMENT", "windows").lower()
+    if ENV == "gcp":
+        time.sleep(2)
+        save_screenshot_to_gcs(browser, "3_after_changing_language.png")
 
     # I have to close the noti box again
     close_notifications(browser)
-    save_screenshot_to_gcs(browser, "4_after_closing_notifications_again.png")
+
+    if ENV == "gcp":
+        save_screenshot_to_gcs(browser, "4_after_closing_notifications_again.png")
 
     # go to the lectures page
     # Find activites card and click it
@@ -362,7 +366,12 @@ def run_scraper() -> list[dict] | None:
         elif env == "linux":
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
-            browser = uc.Chrome(options=options)
+            # Explicit paths for Chromium installed via apt on Lubuntu
+            options.binary_location = "/usr/bin/chromium-browser"
+            browser = uc.Chrome(
+                options=options,
+                driver_executable_path="/usr/bin/chromedriver",
+            )
         else:
             browser = uc.Chrome(options=options, version_main=147)
 
@@ -405,10 +414,10 @@ def execute_scraper_workflow():
     # =========== Run the scraper ===========
     current_lectures = run_scraper()
     env = os.getenv("ENVIRONMENT", "windows").lower()
-    
+
     if env != "gcp":
         logger.info(f"Scraped these: {current_lectures}")
-        
+
     if current_lectures is None:
         logger.error("Scraper failed to run.")
         return {"error": "Scraper failed to run."}, 500
@@ -436,10 +445,7 @@ def execute_scraper_workflow():
 
     logger.info(f"Found {len(new_lectures)} new lectures.")
 
-    # Save them locally if not running in gcp
-    if env != "gcp":
-        with open("lectures.json", "w", encoding="utf-8") as f:
-            json.dump(new_lectures, f, ensure_ascii=False, indent=4)
+
 
     # =========== Send emails ===========
     message, success = send_brevo_email(new_lectures)
@@ -447,11 +453,12 @@ def execute_scraper_workflow():
         logger.info("Emails sent successfully.")
         # Only save the new state if emails were sent successfully
         # This ensures that if email sending fails, we'll try again next time
-        save_lectures_to_gcs(previous_lectures + new_lectures)
+        save_lectures(previous_lectures + new_lectures)
         return {"message": message}, 200
     else:
         logger.error(f"Failed to send emails: {message}")
         return {"error": message}, 500
+
 
 @app.route("/", methods=["GET", "POST"])
 def main():

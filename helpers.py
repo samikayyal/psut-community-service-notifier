@@ -71,7 +71,18 @@ def get_gcs_bucket() -> storage.Bucket | None:
 
 
 def load_previous_lectures() -> list[dict]:
-    """Load previously scraped lectures from GCS"""
+    """Load previously scraped lectures from GCS or locally"""
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    
+    if env == "linux":
+        try:
+            if os.path.exists("lectures.json"):
+                with open("lectures.json", "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load previous lectures locally: {e}")
+        return []
+
     try:
         bucket = get_gcs_bucket()
         if not bucket:
@@ -85,8 +96,19 @@ def load_previous_lectures() -> list[dict]:
     return []
 
 
-def save_lectures_to_gcs(lectures: list[dict]):
-    """Save current lectures to GCS"""
+def save_lectures(lectures: list[dict]):
+    """Save current lectures to GCS or locally"""
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    
+    if env == "linux":
+        try:
+            with open("lectures.json", "w", encoding="utf-8") as f:
+                json.dump(lectures, f, ensure_ascii=False, indent=4)
+            logger.info("Saved lectures to lectures.json locally")
+        except Exception as e:
+            logger.error(f"Could not save lectures locally: {e}")
+        return
+
     try:
         bucket = get_gcs_bucket()
         if not bucket:
