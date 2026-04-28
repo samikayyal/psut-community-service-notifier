@@ -123,7 +123,24 @@ def save_lectures(lectures: list[dict]):
 
 
 def save_screenshot_to_gcs(browser, filename: str):
-    """Save a screenshot to GCS using memory instead of disk"""
+    """Save a screenshot to GCS or locally depending on the environment"""
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    
+    if env == "linux":
+        try:
+            # Create a screenshots directory if it doesn't exist
+            os.makedirs("screenshots", exist_ok=True)
+            local_path = os.path.join("screenshots", filename)
+            
+            logger.info(f"Taking screenshot: {filename} (local)")
+            browser.save_screenshot(local_path)
+            logger.info(f"Successfully saved screenshot {filename} locally to {local_path}")
+            return
+        except Exception as e:
+            logger.error(f"Could not save screenshot locally: {e}")
+            return
+
+    # GCS logic for other environments (e.g., GCP)
     print(f"DEBUG: save_screenshot_to_gcs called for {filename}", flush=True)
     try:
         bucket = get_gcs_bucket()
