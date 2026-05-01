@@ -17,6 +17,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 import logger_setup
+from error_notifier import install_exception_hook
 from helpers import (
     clean_html,
     close_notifications,
@@ -28,6 +29,7 @@ from helpers import (
 from send_emails import send_brevo_email
 
 load_dotenv()
+install_exception_hook(__name__)
 # Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")

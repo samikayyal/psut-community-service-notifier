@@ -13,9 +13,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from error_notifier import install_exception_hook
 from logger_setup import logger
 
 load_dotenv()
+install_exception_hook(__name__)
 
 
 def parse_gemini_error(e: errors.APIError) -> str:

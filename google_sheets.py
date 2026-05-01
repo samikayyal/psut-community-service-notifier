@@ -4,6 +4,10 @@ from pathlib import Path
 import gspread
 from google.oauth2.service_account import Credentials
 
+from error_notifier import install_exception_hook, notify_error
+
+install_exception_hook(__name__)
+
 
 def get_google_sheets_client() -> gspread.Client:
     """Initialize and return Google Sheets client using service account."""
@@ -104,4 +108,5 @@ if __name__ == "__main__":
         for email in recipients:
             print(f"  - {email}")
     except Exception as e:
+        notify_error(e, source=__name__, details="Google Sheets test failed")
         print(f"Error: {e}")

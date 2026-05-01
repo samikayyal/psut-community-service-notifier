@@ -5,9 +5,11 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
+from error_notifier import install_exception_hook, notify_error
 from google_sheets import fetch_recipients_from_sheet
 
 load_dotenv()
+install_exception_hook(__name__)
 
 
 def generate_lecture_card(lec: dict) -> str:
@@ -171,11 +173,16 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
         else:
             recipients = fetch_recipients_from_sheet()
     except Exception as e:
+        notify_error(
+            e, source=__name__, details="Failed to fetch recipients from Google Sheet"
+        )
         return f"Failed to fetch recipients from Google Sheet: {e}", False
 
     if not api_key or not sender_email:
+        notify_error("Brevo configuration missing in .env", source=__name__)
         return "Brevo configuration missing in .env", False
     if not recipients:
+        notify_error("No recipients found in Google Sheet", source=__name__)
         return "No recipients found in Google Sheet", False
 
     # 1. Generate lecture cards
@@ -254,11 +261,19 @@ def send_brevo_email(lectures: list[dict]) -> tuple[str, bool]:
         if response.status_code in [200, 201]:
             return "Emails sent successfully via Brevo.", True
         else:
+            notify_error(
+                f"Brevo email failed with status {response.status_code}",
+                source=__name__,
+                details=response.text,
+            )
             return (
                 f"Failed to send email via Brevo. Status: {response.status_code}, Response: {response.text}",
                 False,
             )
     except Exception as e:
+        notify_error(
+            e, source=__name__, details="Exception occurred while sending email"
+        )
         return f"Exception occurred while sending email: {e}", False
 
 
