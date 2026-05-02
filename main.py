@@ -2,6 +2,7 @@ import json
 import os
 import time
 import traceback
+from contextlib import contextmanager
 from datetime import datetime
 
 import undetected_chromedriver as uc
@@ -29,12 +30,72 @@ from helpers import (
 from send_emails import send_brevo_email
 
 load_dotenv()
-install_exception_hook(__name__)
+install_exception_hook("main")
 # Define globals
 USERNAME: str = os.getenv("PSUT_USERNAME", "")
 PASSWORD: str = os.getenv("PSUT_PASSWORD", "")
 logger = logger_setup.logger
 app = Flask(__name__)
+
+
+@contextmanager
+def single_scraper_run():
+    """Prevent overlapping cron/web invocations from fighting over Xvfb/Chrome."""
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    lock_file = None
+    lock_path = "/tmp/psut_community_service_notifier.lock"
+
+    if env in ["gcp", "linux"]:
+        try:
+            import fcntl
+
+            lock_file = open(lock_path, "w", encoding="utf-8")
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+
+            lock_file.write(f"{os.getpid()}\n")
+            lock_file.flush()
+        except Exception as e:
+            logger.warning(f"Could not acquire scraper lock at {lock_path}: {e}")
+
+    try:
+        yield True
+    finally:
+        if lock_file:
+            try:
+                import fcntl
+
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+            finally:
+                lock_file.close()
+
+
+def start_virtual_display():
+    env = os.getenv("ENVIRONMENT", "windows").lower()
+    if env not in ["gcp", "linux"]:
+        return None
+
+    from pyvirtualdisplay import Display
+    from pyvirtualdisplay.abstractdisplay import XStartError
+
+    last_error = None
+    for attempt in range(1, 4):
+        display = Display(visible=False, size=(1920, 1080))
+        try:
+            display.start()
+            logger.info(f"Started virtual display on {display.display}")
+            return display
+        except XStartError as e:
+            last_error = e
+            logger.warning(
+                f"Xvfb failed to start on attempt {attempt}/3; retrying shortly: {e}"
+            )
+            time.sleep(attempt)
+
+    raise last_error
 
 
 class LectureData(BaseModel):
@@ -339,14 +400,11 @@ def run_scraper() -> list[dict] | None:
     # Headless environments need an Xvfb virtual framebuffer
     # so Chrome can run in headful mode (required for reCAPTCHA v3 to score well).
     display = None
-    if env in ["gcp", "linux"]:
-        from pyvirtualdisplay import Display
-
-        display = Display(visible=False, size=(1920, 1080))
-        display.start()
 
     # =========== Create the browser ===========
     try:
+        display = start_virtual_display()
+
         options = uc.ChromeOptions()
         # NOT headless — reCAPTCHA v3 gives near-zero scores to headless browsers.
         # Xvfb provides the virtual display on Cloud Run instead.
@@ -420,7 +478,12 @@ def run_scraper() -> list[dict] | None:
 def execute_scraper_workflow():
     logger.info("Starting scraper process...")
     # =========== Run the scraper ===========
-    current_lectures = run_scraper()
+    with single_scraper_run() as can_run:
+        if not can_run:
+            logger.info("Another scraper run is already active; skipping this run.")
+            return {"message": "Another scraper run is already active."}, 200
+
+        current_lectures = run_scraper()
     env = os.getenv("ENVIRONMENT", "windows").lower()
 
     if env != "gcp":
