@@ -2,7 +2,7 @@ import json
 import os
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 
 import undetected_chromedriver as uc
@@ -42,35 +42,43 @@ app = Flask(__name__)
 def single_scraper_run():
     """Prevent overlapping cron/web invocations from fighting over Xvfb/Chrome."""
     env = os.getenv("ENVIRONMENT", "windows").lower()
-    lock_file = None
-    lock_path = "/tmp/psut_community_service_notifier.lock"
+    lock_socket = None
 
     if env in ["gcp", "linux"]:
         try:
-            import fcntl
+            import errno
+            import socket
 
-            lock_file = open(lock_path, "w", encoding="utf-8")
-            try:
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            lock_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            # Linux abstract sockets do not create files, so this avoids /tmp
+            # quota and stale lock-file problems while the process is alive.
+            lock_socket.bind("\0psut_community_service_notifier")
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                if lock_socket:
+                    with suppress(OSError):
+                        lock_socket.close()
                 yield False
                 return
 
-            lock_file.write(f"{os.getpid()}\n")
-            lock_file.flush()
+            logger.warning(f"Could not acquire scraper process lock: {e}")
+            if lock_socket:
+                with suppress(OSError):
+                    lock_socket.close()
+                lock_socket = None
         except Exception as e:
-            logger.warning(f"Could not acquire scraper lock at {lock_path}: {e}")
+            logger.warning(f"Could not acquire scraper process lock: {e}")
+            if lock_socket:
+                with suppress(OSError):
+                    lock_socket.close()
+                lock_socket = None
 
     try:
         yield True
     finally:
-        if lock_file:
-            try:
-                import fcntl
-
-                fcntl.flock(lock_file, fcntl.LOCK_UN)
-            finally:
-                lock_file.close()
+        if lock_socket:
+            with suppress(OSError):
+                lock_socket.close()
 
 
 def start_virtual_display():
